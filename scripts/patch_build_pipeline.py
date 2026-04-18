@@ -2,30 +2,52 @@
 """
 Patch compile/build script to inject trace preprocessor command.
 Idempotent by marker comments.
+
+Anchor strategy: tries multiple patterns to find where sources have been
+copied into the build directory but before the actual compilation starts.
+Falls back to inserting right before the first './build.sh' invocation.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
 START_MARK = "# TRACE_PREPROCESSOR_HOOK_START"
 END_MARK = "# TRACE_PREPROCESSOR_HOOK_END"
 
+ANCHOR_PATTERNS = [
+    re.compile(r'[Cc]opy_?[Oo]ps\s+.*ascend_kernels.*'),
+    re.compile(r'cp\s+-rf\s+.*ascend_kernels/pregen\b.*'),
+    re.compile(r'modify_func_cmake'),
+]
+
+FALLBACK_PATTERN = re.compile(r'^\s*\./build\.sh', re.MULTILINE)
+
 
 def inject_hook(script_text: str, cmd: str) -> str:
     if START_MARK in script_text and END_MARK in script_text:
         return script_text
 
-    anchor = "CopyOps \"./ascend_kernels\" \"./${proj_name}\""
-    idx = script_text.find(anchor)
-    if idx < 0:
-        raise RuntimeError("anchor not found in compile script")
-
-    insert_at = script_text.find("\n", idx)
+    insert_at = -1
+    for pattern in ANCHOR_PATTERNS:
+        m = pattern.search(script_text)
+        if m:
+            nl = script_text.find("\n", m.end())
+            if nl >= 0:
+                insert_at = nl
     if insert_at < 0:
-        insert_at = len(script_text)
+        m = FALLBACK_PATTERN.search(script_text)
+        if m:
+            insert_at = m.start() - 1
+    if insert_at < 0:
+        raise RuntimeError(
+            "Cannot find anchor in compile script. "
+            "Looked for copy_ops/CopyOps, modify_func_cmake, or ./build.sh. "
+            "Please insert the hook manually before the build step."
+        )
 
     hook = (
         f"\n    {START_MARK}\n"
