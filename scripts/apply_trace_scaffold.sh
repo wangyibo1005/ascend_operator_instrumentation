@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# One-shot helper: copy toolchain + patch an EXISTING compile script.
+# Do not treat this file as the project's compile entrypoint; after setup,
+# teams keep using their original compile_*.sh / CI command.
 set -euo pipefail
 
 if [[ $# -lt 3 ]]; then
