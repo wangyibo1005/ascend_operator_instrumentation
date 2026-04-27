@@ -135,7 +135,7 @@ def resolve_include(from_file: Path, include_path: str) -> Path | None:
 def check_header_reachability(
     src_dir: Path, files: List[Path], result: CheckResult
 ) -> None:
-    base_names = {"fused_deep_moe_base.h", "moe_base.h"}
+    base_names = {"fused_deep_moe_base.h", "moe_base.h", "moe_dispatch_normal_base.h"}
 
     def has_base_transitively(path: Path, visited: set) -> bool:
         if path in visited:

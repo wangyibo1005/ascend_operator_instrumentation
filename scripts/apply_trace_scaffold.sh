@@ -17,6 +17,9 @@ COMPILE_SCRIPT="$3"
 echo "=== Step 1: Deploy toolchain scripts ==="
 python3 "${SKILL_ROOT}/scripts/bootstrap_trace_toolchain.py" --build-dir "${BUILD_DIR}"
 
+# NOTE: The --preprocessor-cmd below is an ILLUSTRATIVE placeholder. Your real compile script
+# likely uses different variable names (e.g. dirname(BASH_SOURCE) for script dir, MODULE_BUILD_PATH).
+# Edit this line to match the working hook in your repo's compile_ascend_proj.sh (see UMDK example).
 echo "=== Step 2: Patch compile script ==="
 python3 "${SKILL_ROOT}/scripts/patch_build_pipeline.py" \
   --compile-script "${COMPILE_SCRIPT}" \

@@ -6,6 +6,7 @@
 
 import json
 import os
+import sys
 import glob
 import torch
 from collections import defaultdict, deque
@@ -71,10 +72,48 @@ def load_all_ranks(data_dir: str) -> Dict[int, List[Dict]]:
 
 def load_mapping(path: str) -> Dict:
     if not os.path.exists(path):
+        print(f"ERROR: point_map not found: {os.path.abspath(path)}", file=sys.stderr)
         return {}
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return data.get("points", data) if isinstance(data, dict) and "points" in data else data
+    inner = data.get("points", data) if isinstance(data, dict) and "points" in data else data
+    if not isinstance(inner, dict):
+        print("ERROR: point_map must be a JSON object or {\"points\": {...}}", file=sys.stderr)
+        return {}
+    # Keys must be strings for lookup (str(base_point_id)).
+    return {str(k): v for k, v in inner.items()}
+
+
+def diagnose_mapping_overlap(all_data: Dict[int, List[Dict]], mapping: Dict) -> None:
+    """Print how many profiling base_point_ids exist in point_map (root cause when skipped_no_mapping is high)."""
+    uniq = set()
+    for rid in all_data:
+        for rec in all_data[rid]:
+            uniq.add(str(rec["base_point_id"]))
+    mk = set(mapping.keys())
+    inter = uniq & mk
+    print(f"diagnose: unique base_point_id in rank*.pt: {len(uniq)}", file=sys.stderr)
+    print(f"diagnose: point_map keys: {len(mk)}", file=sys.stderr)
+    print(f"diagnose: intersection (ids that can be decoded to labels): {len(inter)}", file=sys.stderr)
+    if uniq and mk and not inter:
+        print(
+            "diagnose: NO OVERLAP — point_map.json does not match this kernel build. "
+            "Use the point_map.json from the same ascend_kernels_*_proj directory that was compiled into the installed OPP.",
+            file=sys.stderr,
+        )
+    missing = uniq - mk
+    if missing:
+        def _ik(x: str) -> int:
+            try:
+                return int(x)
+            except ValueError:
+                return 0
+
+        samp = sorted(missing, key=_ik)[:40]
+        print(f"diagnose: sample ids present in pt but missing from point_map: {samp}", file=sys.stderr)
+    if mk:
+        sampk = sorted(mk, key=lambda x: int(x) if str(x).lstrip("-").isdigit() else 0)[:25]
+        print(f"diagnose: sample point_map keys: {sampk}", file=sys.stderr)
 
 
 def build_interval_tree(intervals: List[Dict]):
@@ -132,6 +171,7 @@ def generate_chrome_trace(
     tid_groups: Dict[Tuple, List[Dict]] = defaultdict(list)
     tid_meta_set = set()
 
+    skipped_no_mapping = 0
     for rid in sorted_ranks:
         pid = rank_to_pid[rid]
         for rec in all_data[rid]:
@@ -139,6 +179,7 @@ def generate_chrome_trace(
             info = mapping.get(bp, {})
             et = info.get("event_type")
             if not et:
+                skipped_no_mapping += 1
                 continue
             label = info.get("label", f"point_{bp}")
             raw_extra = rec["extra_id"]
@@ -260,11 +301,18 @@ def generate_chrome_trace(
             "clock_divisor": CLOCK_DIVISOR,
             "extra_mode": extra_mode,
             "depth": depth,
+            "skipped_no_mapping": skipped_no_mapping,
         },
     }
     with open(output_file, "w") as f:
         json.dump(trace, f, indent=2)
     print(f"Chrome trace generated: {output_file} ({len(final_events)} events)")
+    if skipped_no_mapping:
+        print(
+            f"WARNING: {skipped_no_mapping} raw records skipped (no point_map entry for base_point_id). "
+            "Use point_map.json from the same build as the installed kernel.",
+            file=sys.stderr,
+        )
     return trace
 
 
@@ -284,8 +332,18 @@ def main():
 
     all_data = load_all_ranks(args.data_dir)
     if not all_data:
-        print("No data found"); return
+        print(f"No rank*.pt files found in {args.data_dir}", file=sys.stderr)
+        return
+    n_raw = sum(len(v) for v in all_data.values())
+    if n_raw == 0:
+        print(
+            "No profiling records parsed from rank*.pt (per-core counters [*,0] look empty). "
+            "Dump profiling_data only after torch_npu.npu.synchronize() so device writes are visible on host.",
+            file=sys.stderr,
+        )
     mapping = load_mapping(args.mapping_file)
+    print(f"diagnose: point_map file: {os.path.abspath(args.mapping_file)}", file=sys.stderr)
+    diagnose_mapping_overlap(all_data, mapping)
     generate_chrome_trace(all_data, mapping, args.output, args.extra_mode, args.depth)
 
 

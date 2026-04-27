@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run from repo root, or any cwd — resolves this script's directory (skill name uses underscores).
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -6,4 +7,5 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-python .cursor/skills/ascend-operator-instrumentation/scripts/validate_trace_points.py "$1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "${SCRIPT_DIR}/validate_trace_points.py" "$1"

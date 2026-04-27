@@ -39,6 +39,7 @@ def _script_dir() -> str:
 def get_define_value_from_base(macro_name: str, base_h_path: Optional[str] = None):
     if base_h_path and os.path.isfile(base_h_path):
         return get_define_value_from_file(base_h_path, macro_name)
+    # Fallback path is UMDK-example layout; other operators MUST pass base_h_path to save_profiling_data.
     candidates = [
         os.path.join(_script_dir(), "../../../src/cam/comm_operator/ascend_kernels/fused_deep_moe/op_kernel/fused_deep_moe_base.h"),
     ]
